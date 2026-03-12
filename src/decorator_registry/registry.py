@@ -1,4 +1,5 @@
 import inspect
+import types
 from dataclasses import dataclass
 from typing import Any, Callable, Sequence, Tuple, Union, Optional, TypeVar, ParamSpec
 from collections import defaultdict
@@ -157,7 +158,12 @@ def register_decorator(k: RegistryKey, *, group: str = "default"):
     key = _normalize_key(k)
     def decorator(dec: Decorator) -> Decorator:
         plain_registry[key].append(
-            DecoratorSpec(decorator=dec, group=group, kind="plain", origin=_origin_id(dec))
+            DecoratorSpec(
+                decorator=dec,
+                group=group,
+                kind="plain",
+                origin=_origin_id(dec)
+            )
         )
         return dec
     return decorator
@@ -287,13 +293,17 @@ def decorate_from_registry(
             continue
         desired_tokens = tuple(_spec_token(s) for s in specs)
 
+
         try:
             raw_attr = inspect.getattr_static(cls, method_name)
         except AttributeError:
-            continue
+            try:
+                raw_attr = inspect.getattr_static(obj, method_name)
+                cls = obj
+            except AttributeError:
+                continue
 
         # ---- handle descriptors ----
-
         if isinstance(raw_attr, staticmethod):
             current = raw_attr.__func__
             if already_current(current, desired_tokens):

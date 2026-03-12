@@ -17,13 +17,13 @@ This is useful for instrumentation/logging/telemetry, invariant checks, TeX snap
 ### From GitHub (recommended while developing)
 
 ```bash
-pip install "decorator-registry @ git+https://github.com/<you>/decorator-registry.git@main"
+pip install "decorator-registry @ git+https://github.com/AirborneKiwi/decorator-registry.git@main"
 ```
 
 Pin a tag once you create releases:
 
 ```bash
-pip install "decorator-registry @ git+https://github.com/<you>/decorator-registry.git@v0.1.0"
+pip install "decorator-registry @ git+https://github.com/AirborneKiwi/decorator-registry.git@v0.1.0"
 ```
 
 ## Quickstart
@@ -51,13 +51,14 @@ decorator_group = __file__
 def _enabled() -> bool:
     return ENABLED
 
-# Example: log around Context.balance
+# Example: log around Context.balance defined by a tuple of strings
 @register_before(("Context", "balance"), group=decorator_group, enabled=_enabled)
 def _balance_before(self, *a, **k):
     print(">>> BALANCE")
     print(self.format_phase_table_console())
 
-@register_after(("Context", "balance"), group=decorator_group, enabled=_enabled)
+# or directly with the function
+@register_after(Context.balance, group=decorator_group, enabled=_enabled)
 def _balance_after(self, _res, *a, **k):
     print(self.format_phase_table_console())
     print("<<< BALANCE")

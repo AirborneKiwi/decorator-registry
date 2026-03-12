@@ -23,7 +23,7 @@ pip install "decorator-registry @ git+https://github.com/AirborneKiwi/decorator-
 Pin a tag once you create releases:
 
 ```bash
-pip install "decorator-registry @ git+https://github.com/AirborneKiwi/decorator-registry.git@v0.1.0"
+pip install "decorator-registry @ git+https://github.com/AirborneKiwi/decorator-registry.git@v1.0"
 ```
 
 ## Quickstart

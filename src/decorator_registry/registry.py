@@ -1,5 +1,4 @@
 import inspect
-import types
 from dataclasses import dataclass
 from typing import Any, Callable, Sequence, Tuple, Union, Optional, TypeVar, ParamSpec
 from collections import defaultdict
@@ -17,6 +16,8 @@ AfterHook  = Callable[..., None]                 # (self, result, *args, **kwarg
 ErrorHook  = Callable[..., None]                 # (self, exc, *args, **kwargs) -> None
 EnabledFn  = Callable[[], bool]                  # () -> bool
 
+DEBUG_LOG = True
+
 # ---- decorator/hook types
 
 def before(
@@ -32,14 +33,14 @@ def before(
     """
     def decorator(func: Callable[P, R]) -> Callable[P, R]:
         @wraps(func)
-        def wrapper(self, *args: P.args, **kwargs: P.kwargs) -> R:
+        def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
             if not enabled():
-                return func(self, *args, **kwargs)
+                return func(*args, **kwargs)
 
             if before_func is not None:
-                before_func(self, *args, **kwargs)
+                before_func(*args, **kwargs)
 
-            res = func(self, *args, **kwargs)
+            res = func(*args, **kwargs)
             return res
         return wrapper
     return decorator
@@ -59,14 +60,14 @@ def after(
     """
     def decorator(func: Callable[P, R]) -> Callable[P, R]:
         @wraps(func)
-        def wrapper(self, *args: P.args, **kwargs: P.kwargs) -> R:
+        def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
             if not enabled():
-                return func(self, *args, **kwargs)
+                return func(*args, **kwargs)
 
-            res = func(self, *args, **kwargs)
+            res = func(*args, **kwargs)
 
             if after_func is not None:
-                after_func(self, res, *args, **kwargs)
+                after_func(res, *args, **kwargs)
             return res
         return wrapper
     return decorator
@@ -86,14 +87,14 @@ def on_error(
 
     def decorator(func: Callable[P, R]) -> Callable[P, R]:
         @wraps(func)
-        def wrapper(self, *args: P.args, **kwargs: P.kwargs) -> R:
+        def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
             if not enabled():
                 return func(self, *args, **kwargs)
 
             try:
-                return func(self, *args, **kwargs)
+                return func(*args, **kwargs)
             except Exception as exc:
-                r = on_error_func(self, exc, *args, **kwargs) if on_error_func is not None else None
+                r = on_error_func(exc, *args, **kwargs) if on_error_func is not None else None
                 if r is None or r is False:
                     raise  # preserves traceback
                 return r  # type: ignore[return-value]
@@ -128,6 +129,8 @@ group_flags: dict[str, bool] = defaultdict(lambda: True)
 
 def set_group_enabled(group: str, enabled: bool = True) -> None:
     group_flags[group] = bool(enabled)
+    if DEBUG_LOG:
+        print(f'[decorator_registry] Group {group} {"enabled" if enabled else "disabled"}')
 
 def enable_group(group: str) -> None:
     set_group_enabled(group, True)
@@ -156,20 +159,19 @@ def _apply_decorators(func: Callable, decorators: Sequence[Decorator]) -> Callab
 
 def register_decorator(k: RegistryKey, *, group: str = "default"):
     key = _normalize_key(k)
+    if DEBUG_LOG:
+        print(f'[decorator_registry] "plain" decorator for group {group} registered: {key}')
     def decorator(dec: Decorator) -> Decorator:
         plain_registry[key].append(
-            DecoratorSpec(
-                decorator=dec,
-                group=group,
-                kind="plain",
-                origin=_origin_id(dec)
-            )
+            DecoratorSpec(decorator=dec, group=group, kind="plain", origin=_origin_id(dec))
         )
         return dec
     return decorator
 
 def register_before(k: RegistryKey, *, group: str = "default", enabled):
     key = _normalize_key(k)
+    if DEBUG_LOG:
+        print(f'[decorator_registry] "before" decorator for group {group} registered: {key}')
     def deco(hook) -> Callable:
         before_registry[key].append(
             DecoratorSpec(
@@ -191,6 +193,8 @@ def register_before_many(targets, *, group, enabled):
 
 def register_after(k: RegistryKey, *, group: str = "default", enabled):
     key = _normalize_key(k)
+    if DEBUG_LOG:
+        print(f'[decorator_registry] "after" decorator for group {group} registered: {key}')
     def deco(hook) -> Callable:
         after_registry[key].append(
             DecoratorSpec(
@@ -212,6 +216,8 @@ def register_after_many(targets, *, group, enabled):
 
 def register_on_error(k: RegistryKey, *, group: str = "default", enabled):
     key = _normalize_key(k)
+    if DEBUG_LOG:
+        print(f'[decorator_registry] "on_error" decorator for group {group} registered: {key}')
     def deco(hook) -> Callable:
         error_registry[key].append(
             DecoratorSpec(
@@ -241,6 +247,10 @@ def decorate_from_registry(
     groups: Optional[Sequence[str]] = None,
     include_ungrouped: bool = True,
 ) -> Any:
+
+    if DEBUG_LOG:
+        print(f'[decorator_registry] Decorating from registry ...')
+
     cls = obj if isinstance(obj, type) else obj.__class__
     cls_name_keys = {cls.__name__, cls.__qualname__}
     groups_set = set(groups) if groups is not None else None
@@ -293,7 +303,6 @@ def decorate_from_registry(
             continue
         desired_tokens = tuple(_spec_token(s) for s in specs)
 
-
         try:
             raw_attr = inspect.getattr_static(cls, method_name)
         except AttributeError:
@@ -304,6 +313,7 @@ def decorate_from_registry(
                 continue
 
         # ---- handle descriptors ----
+
         if isinstance(raw_attr, staticmethod):
             current = raw_attr.__func__
             if already_current(current, desired_tokens):
@@ -312,6 +322,9 @@ def decorate_from_registry(
             wrapped = rebuild(base, specs)
             setattr(cls, method_name, staticmethod(wrapped))
 
+            if DEBUG_LOG:
+                print(f'[decorator_registry] Static method {raw_attr} decorated')
+
         elif isinstance(raw_attr, classmethod):
             current = raw_attr.__func__
             if already_current(current, desired_tokens):
@@ -319,6 +332,9 @@ def decorate_from_registry(
             base = getattr(current, "__registry_original__", current)
             wrapped = rebuild(base, specs)
             setattr(cls, method_name, classmethod(wrapped))
+
+            if DEBUG_LOG:
+                print(f'[decorator_registry] Class method {raw_attr} decorated')
 
         elif isinstance(raw_attr, property):
             fget = raw_attr.fget
@@ -330,6 +346,9 @@ def decorate_from_registry(
             fget_wrapped = rebuild(base, specs)
             setattr(cls, method_name, property(fget_wrapped, raw_attr.fset, raw_attr.fdel, raw_attr.__doc__))
 
+            if DEBUG_LOG:
+                print(f'[decorator_registry] Property method {raw_attr} decorated')
+
         else:
             current = raw_attr
             if not callable(current):
@@ -340,12 +359,17 @@ def decorate_from_registry(
             wrapped = rebuild(base, specs)
             setattr(cls, method_name, wrapped)
 
+            if DEBUG_LOG:
+                print(f'[decorator_registry] Callable {raw_attr} decorated')
+
     return obj
 
 # ---- module application unchanged ----
 
 def apply_decorators(*targets):
     for t in targets:
+        if DEBUG_LOG:
+            print(f'[decorator_registry] Decorating target: {t}')
         if isinstance(t, ModuleType):
             _decorate_all_classes_in_module(t)
         else:
